@@ -35,7 +35,7 @@ def get_list_request_ozon(current_date: str) -> dict:
         "filter":
         {
             "since": str(since),
-            "status": "awaiting_packaging",
+            "status": "awaiting_deliver",
             "to": current_date
         },
         "limit": 100,
@@ -59,20 +59,21 @@ def get_orders_for_delivery(response: dict) -> list:
     if response.get('result')['postings'] == []:
         raise KeyError('OZON не вернул товары. Заказов пока нет.')
 
+    if not isinstance(response.get('result')['postings'], list):
+        raise TypeError('OZON вернул не список.')
+
     return response.get('result')['postings']
 
 
 def data_ordning_ozon(data: list) -> list:
     result = []
-    for posting in data:
+    for product in data:
         product = {
-            'name': posting['products']['name'],
-            'article': posting['products']['offer_id'],
-            'status': posting['status'],
-            'posting_number': 'K-' + posting['posting_number'],
-            'quantity': posting['products']['quantity'],
-            'price': 100,
-            'delivery_date': posting['delivering_date'][:10].replace('-', '.'),
+            'name_of_product': product['products'][0]["name"],
+            'article': product['products'][0]["offer_id"],
+            'order_number': 'K-' + product["posting_number"],
+            'quantity': product['products'][0]["quantity"],
+            'delivery_date': product["shipment_date"][:10].replace('-', '.'),
         }
         result.append(product)
 
@@ -81,10 +82,11 @@ def data_ordning_ozon(data: list) -> list:
 
 def send_request_to_shipment(data: list) -> None:
     for product in data:
+        print(product['delivery_date'])
         params = {
             "partner_id": DELIVERY_PARTNER_ID,
             "key": DELIVERY_KEY,
-            "order_number": product['posting_number'],
+            "order_number": product['order_number'] + '234dsf',
             "usluga": "ДОСТАВКА",
             "marketplace_id": OZON_MATVEEVSKAYA_MARKETPLACE,
             "sposob_dostavki": "Маркетплейс",
@@ -94,17 +96,16 @@ def send_request_to_shipment(data: list) -> None:
             "cont_mail": "test@yandex.ru",
             "region_iz": "Москва",
             "ocen_sum": 100,
-            "picking": "Y",
             "free_date": "1",
             "date_dost": product['delivery_date'],
             "products": [
                 {
-                    "name": product['name'],
+                    "name": product['name_of_product'],
                     "qty": product['quantity'],
                     "ed": "шт",
                     "code": product['article'],
                     "oc": 100,
-                    "bare": "1000002055724",
+                    "bare": "000000",
                     "mono": 0,
                     "mark": 0,
                     "pack": 0
@@ -134,7 +135,8 @@ def main():
 
     try:
         ozon_orders = get_list_request_ozon(current_date)
-        sorted_products = get_orders_for_delivery(ozon_orders)
+        get_products = get_orders_for_delivery(ozon_orders)
+        sorted_products = data_ordning_ozon(get_products)
         send_request_to_shipment(sorted_products)
         logging.info('Все окей, заказы создались.')
     except Exception as error:
