@@ -207,7 +207,7 @@ def send_request_to_shipment(order_list: list) -> None:
 
 def clean_pdf():
     """Очищает все штриз кода по завершению."""
-    dir = './pdf/'
+    dir = './pdf'
     for f in os.listdir(dir):
         os.remove(os.path.join(dir, f))
 
@@ -228,11 +228,12 @@ def main():
     current_date = str(dt.utcnow().isoformat()+'Z')
 
     try:
+        clean_pdf()
         ozon_orders = get_list_request_ozon(current_date)
         get_products = get_orders_for_delivery(ozon_orders)
         make_order = data_ordning_ozon(get_products)
         send_request_to_shipment(make_order)
-        clean_pdf()
+        
         logging.info('Все окей, заказы создались.')
     except Exception as error:
         logging.error(error, traceback)
