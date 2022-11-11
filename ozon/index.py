@@ -3,6 +3,7 @@ import logging
 from datetime import datetime as dt, timedelta
 from http import HTTPStatus
 import base64
+import time
 import traceback
 
 import requests
@@ -98,6 +99,7 @@ def get_barcode(article: list) -> str:
 
 def download_pdf_barcode(posting_number: str):
     """Сохраняет штрихкода OZON в директорию pdf."""
+    print(posting_number)
     json = {
         "posting_number": [
             posting_number
@@ -111,7 +113,7 @@ def download_pdf_barcode(posting_number: str):
     )
 
     if response.status_code == HTTPStatus.OK:
-        with open(f'./pdf/{posting_number}.pdf', 'wb') as file:
+        with open(f'./ozon/pdf/{posting_number}.pdf', 'wb') as file:
             file.write(response.content)
         return True
 
@@ -120,15 +122,15 @@ def download_pdf_barcode(posting_number: str):
 
 def json_barcode_from_ozon_to_delivery(posting_number: str) -> dict:
     """Подготавливает запрос к API склада для отправки штрихкода."""
-    with open(f'./pdf/{posting_number}.pdf', 'rb') as file:
+    with open(f'./ozon/pdf/{posting_number}.pdf', 'rb') as file:
         barcode_json = {
             "partner_id": DELIVERY_PARTNER_ID,
             "key": DELIVERY_KEY,
             "format": "pdf",
-            "type": 4,
+            "type": 2,
             "copy": 1,
-            "name": posting_number + ".pdf",
-            "order_number": '2P' + posting_number,
+            "name": posting_number,
+            "order_number": '2P-' + posting_number,
             "file": str(base64.b64encode(file.read()))
         }
 
@@ -148,9 +150,9 @@ def data_ordning_ozon(data: list) -> list:
                 "marketplace_id": OZON_MATVEEVSKAYA_MARKETPLACE,
                 "sposob_dostavki": "Маркетплейс",
                 "tip_otpr": "FBS с комплектацией",
-                "cont_name": "Айбатыр",
-                "cont_tel": "+7 (888) 888-88-40",
-                "cont_mail": "test@yandex.ru",
+                "cont_name": "Батыр",
+                "cont_tel": "+7(964)775-52-25",
+                "cont_mail": "bibalaev@gmail.com",
                 "region_iz": "Москва",
                 "ocen_sum": 100,
                 "free_date": "1",
@@ -196,9 +198,14 @@ def send_request_to_shipment(order_list: list) -> None:
             raise ConnectionError(
                 'Запрос к API штрих кода склада не увенчался успехом.'
             )
+        time.sleep(60)
         response_barcode = requests.post(
             BARCODE_DELIVERY_URL,
-            json=json_barcode_from_ozon_to_delivery(order['order_number'][2]))
+            json=json_barcode_from_ozon_to_delivery(
+                order['order_number'][3::]
+            )
+        )
+        print((response_barcode._content).decode('UTF-8'))
         if response_barcode.status_code != HTTPStatus.OK:
             raise ConnectionError(
                 'Запрос к API штрих кода склада не увенчался успехом.'
@@ -207,7 +214,7 @@ def send_request_to_shipment(order_list: list) -> None:
 
 def clean_pdf():
     """Очищает все штриз кода по завершению."""
-    dir = './pdf'
+    dir = './ozon/pdf'
     for f in os.listdir(dir):
         os.remove(os.path.join(dir, f))
 
@@ -233,7 +240,6 @@ def main():
         get_products = get_orders_for_delivery(ozon_orders)
         make_order = data_ordning_ozon(get_products)
         send_request_to_shipment(make_order)
-        
         logging.info('Все окей, заказы создались.')
     except Exception as error:
         logging.error(error, traceback)
