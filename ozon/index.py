@@ -129,8 +129,8 @@ def json_barcode_from_ozon_to_delivery(posting_number: str) -> dict:
             "format": "pdf",
             "type": 2,
             "copy": 1,
-            "name": file.name,
-            "order_number": '2P-' + posting_number,
+            "name": str(posting_number) + ".pdf",
+            "order_number": "2P-" + posting_number,
             "file": str(base64.b64decode(file.read()))
         }
 
