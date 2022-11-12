@@ -18,28 +18,24 @@ BASE_DIR = os.path.dirname(__file__)
 DELIVERY_PARTNER_ID = os.getenv('DELIVERY_ID')
 DELIVERY_KEY = os.getenv('DELIVERY_TOKEN')
 TOKEN = os.getenv('OZON_TOKEN')
-CLIENT_ID = os.getenv('OZON_CLIENT_ID')
-HEADERS = {
+CLIENT_ID = os.getenv('OZON_ID')
+OZON_MATVEEVSKAYA_MARKETPLACE = "49107"
+
+OZON_HEADERS = {
     'Client-Id': CLIENT_ID,
     'Api-Key': TOKEN,
     'Content-Type': 'application/json'
 }
-OZON_MATVEEVSKAYA_MARKETPLACE = "49107"
 
-BASE_URL_DELIVERY = ('https://api.dostavka.guru/client' +
-                     '/in_up_market.php?json=yes')
-BASE_URL_OZON = 'https://api-seller.ozon.ru/v3/posting/fbs/list'
-BARCODE_DELIVERY_URL = 'https://api.dostavka.guru/methods/files/'
+current_date = str(dt.utcnow().isoformat()+'Z')
 
-
-def get_list_request_ozon(current_date: str) -> dict:
-    """Обращение к  API OZON."""
-    since = (dt.utcnow() - timedelta(days=7)).isoformat() + 'Z'
-    params = {
+OZON_PARAMS = {
         "dir": "ASC",
         "filter":
         {
-            "since": str(since),
+            "since": str((
+                dt.utcnow() - timedelta(days=7)).isoformat()
+            ) + 'Z',
             "status": "awaiting_deliver",
             "to": current_date
         },
@@ -47,7 +43,19 @@ def get_list_request_ozon(current_date: str) -> dict:
         "offset": 0
     }
 
-    response = requests.post(url=BASE_URL_OZON, headers=HEADERS, json=params)
+BASE_URL_DELIVERY = ('https://api.dostavka.guru/client' +
+                     '/in_up_market.php?json=yes')
+BASE_URL_OZON = 'https://api-seller.ozon.ru/v3/posting/fbs/list'
+BARCODE_DELIVERY_URL = 'https://api.dostavka.guru/methods/files/'
+
+
+def get_list_request_ozon() -> dict:
+    """Обращение к  API OZON."""
+    response = requests.post(
+        url=BASE_URL_OZON,
+        headers=OZON_HEADERS,
+        json=OZON_PARAMS
+    )
     if response.status_code != HTTPStatus.OK:
         raise ConnectionError('Запрос к API не увенчался успехом.')
 
@@ -110,15 +118,15 @@ def download_pdf_barcode(posting_number: str):
     response = requests.post(
         'https://api-seller.ozon.ru/v2/posting/fbs/package-label',
         json=json,
-        headers=HEADERS
+        headers=OZON_HEADERS
     )
 
-    if response.status_code == HTTPStatus.OK:
-        with open(f'./ozon/pdf/{posting_number}.pdf', 'wb') as file:
-            file.write(response.content)
-        return True
+    if response.status_code != HTTPStatus.OK:
+        raise ConnectionError('Невозможно скачать штрих-код.', response.status_code)        
 
-    raise ConnectionError('Маркировка штрих-кода не скачалась.')
+    with open(f'./ozon/pdf/{posting_number}.pdf', 'wb') as file:
+        file.write(response.content)
+        return True
 
 
 def json_barcode_from_ozon_to_delivery(posting_number: str) -> dict:
@@ -241,13 +249,11 @@ def main():
             'info:%(message)s \n')
     )
 
-    current_date = str(dt.utcnow().isoformat()+'Z')
-
     try:
         barcodes_list = []
         clean_pdf()
         # Запрос к API OZON
-        ozon_orders = get_list_request_ozon(current_date)
+        ozon_orders = get_list_request_ozon()
         # Получение списка товаров для длоставки
         get_products = get_orders_for_delivery(ozon_orders)
         # Формирование списка товаров для доставки, в ее формате
