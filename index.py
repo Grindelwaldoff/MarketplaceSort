@@ -5,6 +5,7 @@ from http import HTTPStatus
 import base64
 import time
 import traceback
+from functools import lru_cache
 
 import requests
 from dotenv import load_dotenv
@@ -16,8 +17,8 @@ BASE_DIR = os.path.dirname(__file__)
 
 DELIVERY_PARTNER_ID = os.getenv('DELIVERY_ID')
 DELIVERY_KEY = os.getenv('DELIVERY_TOKEN')
-TOKEN = os.getenv('TOKEN')
-CLIENT_ID = os.getenv('CLIENT_ID')
+TOKEN = os.getenv('OZON_TOKEN')
+CLIENT_ID = os.getenv('OZON_CLIENT_ID')
 HEADERS = {
     'Client-Id': CLIENT_ID,
     'Api-Key': TOKEN,
@@ -130,8 +131,8 @@ def json_barcode_from_ozon_to_delivery(posting_number: str) -> dict:
             "type": 2,
             "copy": 1,
             "name": str(posting_number) + ".pdf",
-            "order_number": "2P-" + posting_number,
-            "file": str(base64.b64decode(file.read()))
+            "order_number": "2l-" + posting_number,
+            "file": base64.b64encode(file.read()).decode('UTF-8')
         }
 
     return barcode_json
@@ -145,7 +146,7 @@ def data_ordning_ozon(data: list) -> list:
             order = {
                 "partner_id": DELIVERY_PARTNER_ID,
                 "key": DELIVERY_KEY,
-                "order_number": '2P-' + posting['posting_number'],
+                "order_number": '2l-' + posting['posting_number'],
                 "usluga": "ДОСТАВКА",
                 "marketplace_id": OZON_MATVEEVSKAYA_MARKETPLACE,
                 "sposob_dostavki": "Маркетплейс",
@@ -166,7 +167,7 @@ def data_ordning_ozon(data: list) -> list:
                         "ed": "шт",
                         "code": product['offer_id'],
                         "oc": 100,
-                        "bare": get_barcode(product['offer_id']),
+                        "bare": "00000000000",  # get_barcode(product['offer_id'])
                         "mono": 0,
                         "mark": 0,
                         "pack": 0
@@ -179,41 +180,49 @@ def data_ordning_ozon(data: list) -> list:
     return result
 
 
-def send_request_to_shipment(order_list: list) -> None:
+def send_request_to_shipment(order: dict) -> str:
     """Отправляет запрос к API Склада, создает заявку на доставку."""
-    for order in order_list:
-        response = requests.post(
-            BASE_URL_DELIVERY,
-            json=order,
-        )
-        answer = response.json()
-        if 'errors' in answer:
-            order.update({'date_dost': answer['str'][0][:-1:10]})
+    response = requests.post(
+        BASE_URL_DELIVERY,
+        json=order,
+    )
+    answer = response.json()
+    if 'errors' in answer:
+        order.update({'date_dost': answer['str'][0][:-1:10]})
         requests.post(
             BASE_URL_DELIVERY,
             json=order,
         )
 
-        if response.status_code != HTTPStatus.OK:
-            raise ConnectionError(
-                'Запрос к API штрих кода склада не увенчался успехом.'
-            )
-        time.sleep(60)
-        response_barcode = requests.post(
-            BARCODE_DELIVERY_URL,
-            json=json_barcode_from_ozon_to_delivery(
-                order['order_number'][3::]
-            )
+    if response.status_code != HTTPStatus.OK:
+        raise ConnectionError(
+            'Запрос к API штрих кода склада не увенчался успехом.'
         )
-        print((response_barcode._content).decode('UTF-8'))
-        if response_barcode.status_code != HTTPStatus.OK:
-            raise ConnectionError(
-                'Запрос к API штрих кода склада не увенчался успехом.'
-            )
+
+    return (
+        json_barcode_from_ozon_to_delivery(
+            order['order_number'][3::]
+        )
+    )
 
 
-def clean_pdf():
-    """Очищает все штриз кода по завершению."""
+def send_barcodes(json: dict) -> None:
+    """Отправляет штрих-кода на склад."""
+    response = requests.post(
+        BARCODE_DELIVERY_URL,
+        json=json,
+    )
+    print(response.json())
+
+    if response.status_code != HTTPStatus.OK:
+        raise ConnectionError(
+            'Запрос к API штрих-кода не увенчался успехом.'
+        )
+
+
+@lru_cache
+def clean_pdf() -> None:
+    """Очищает все штрих кода по завершению."""
     dir = './ozon/pdf'
     for f in os.listdir(dir):
         os.remove(os.path.join(dir, f))
@@ -235,11 +244,23 @@ def main():
     current_date = str(dt.utcnow().isoformat()+'Z')
 
     try:
+        barcodes_list = []
         clean_pdf()
+        # Запрос к API OZON
         ozon_orders = get_list_request_ozon(current_date)
+        # Получение списка товаров для длоставки
         get_products = get_orders_for_delivery(ozon_orders)
-        make_order = data_ordning_ozon(get_products)
-        send_request_to_shipment(make_order)
+        # Формирование списка товаров для доставки, в ее формате
+        make_order_list = data_ordning_ozon(get_products)
+        # Отправление запроса к доставке, и загрузка штрих-кодов
+        for order in make_order_list:
+            barcodes_list.append(
+                send_request_to_shipment(order)
+            )
+        time.sleep(10)
+        for barcode in barcodes_list:
+            send_barcodes(barcode)
+
         logging.info('Все окей, заказы создались.')
     except Exception as error:
         logging.error(error, traceback)
