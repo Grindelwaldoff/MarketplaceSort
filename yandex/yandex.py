@@ -53,6 +53,8 @@ def request(url: str, headers: dict, params: dict) -> dict:
         params=params
     )
 
+    print(response.json())
+
     if response.status_code != HTTPStatus.OK:
         raise ConnectionError(
             'Запрос к API не увенчался успехом.'
@@ -135,7 +137,7 @@ def json_barcode_to_delivery(order_id: str) -> dict:
             "type": 0,
             "copy": 1,
             "name": order_id + ".pdf",
-            "order_number": "Y-" + order_id,
+            "order_number": "r_" + order_id,
             "file": base64.b64encode(file.read()).decode('UTF-8')
         }
 
@@ -148,6 +150,8 @@ def send_barcodes(json: dict) -> None:
         BARCODE_DELIVERY_URL,
         json=json,
     )
+    
+    print(response.json())
 
     if response.status_code != HTTPStatus.OK:
         raise ConnectionError(
@@ -166,7 +170,7 @@ def delivery_request_validation(order_list: list) -> dict:
         order_form = {
             "partner_id": DELIVERY_PARTNER_ID,
             "key": DELIVERY_KEY,
-            "order_number": 'Y-' + str(posting['id']),
+            "order_number": 'r_' + str(posting['id']),
             "usluga": "ДОСТАВКА",
             "marketplace_id": YANDEX_MARKETPLACE,
             "sposob_dostavki": "Маркетплейс",
@@ -176,7 +180,7 @@ def delivery_request_validation(order_list: list) -> dict:
             "cont_mail": "bibalaev@gmail.com",
             "region_iz": "Москва",
             "ocen_sum": 100,
-            "free_date": "2",
+            "free_date": "0",
             "date_dost": data_valid(
                 posting['delivery']['shipments']
                 [0]['shipmentDate'].replace('-', '.')),
@@ -190,7 +194,7 @@ def delivery_request_validation(order_list: list) -> dict:
                     "ed": "шт",
                     "code": item['offerId'],
                     "oc": 100,
-                    "bare": get_barcode(item['offerId']),  # get_barcode(item['offerId'])
+                    "bare": "0000000000",  # get_barcode(item['offerId'])
                     "mono": 0,
                     "mark": 0,
                     "pack": 0
@@ -209,13 +213,11 @@ def send_request_to_shipment(order: dict) -> str:
         BASE_URL_DELIVERY,
         json=order,
     )
+    print(response.json())
     if response.status_code != HTTPStatus.OK:
         raise ConnectionError(
             'Запрос к API штрих кода склада не увенчался успехом.'
         )
-
-    time.sleep(10)
-    get_barcode_yandex(order['order_number'][2::])
 
 
 def clean_pdf() -> None:
@@ -264,6 +266,10 @@ def main():
             delivery_order_list = delivery_request_validation(page)
             for order in delivery_order_list:
                 send_request_to_shipment(order)
+
+            time.sleep(10)
+            for order in delivery_order_list:
+                get_barcode_yandex(order['order_number'][2::])
 
     except Exception as error:
         logging.error(error, traceback)

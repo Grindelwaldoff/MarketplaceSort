@@ -3,8 +3,10 @@ import logging
 from datetime import datetime as dt, timedelta
 from http import HTTPStatus
 import base64
+import sys
 import time
 import traceback
+from random import randint
 
 import requests
 
@@ -51,7 +53,7 @@ class MakeOrdersForGuru():
             "ed": "шт",
             "code": offer_id,
             "oc": 100,
-            "bare": "23423423423",  # self.get_barcode_delivery_catalog(offer_id)
+            "bare": f"{randint(0, 100000000)}",  # self.get_barcode_delivery_catalog(offer_id)
             "mono": 0,
             "mark": 0,
             "pack": 0
@@ -75,8 +77,8 @@ class MakeOrdersForGuru():
             "cont_mail": "bibalaev@gmail.com",
             "region_iz": "Москва",
             "ocen_sum": 100,
-            "free_date": "1",
-            "date_dost": date_dost,
+            "free_date": "0",
+            "date_dost": date_dost
         }
         order_form.update({"products": items_list})
 
@@ -132,21 +134,22 @@ class MakeOrdersForGuru():
 
         return barcode_json
 
-    def send_barcode(self, json: dict) -> None:
+    def send_barcode(self, barcode_forms: dict) -> None:
         """Отправляет штрих-кода на склад."""
-        response = requests.post(
-            BARCODE_DELIVERY_URL,
-            json=json,
-        )
-
-        if response.status_code != HTTPStatus.OK:
-            raise ConnectionError(
-                'Запрос к API отвечающим за штрих-код не увенчался успехом.'
+        for form in barcode_forms:
+            response = requests.post(
+                BARCODE_DELIVERY_URL,
+                json=form,
             )
+            print(response.json(), BARCODE_DELIVERY_URL)
+
+            if response.status_code != HTTPStatus.OK:
+                raise ConnectionError(
+                    'Запрос к API отвечающим за штрих-код не увенчался успехом.'
+                )
 
     def send_request_to_shipment(
         self, delivery_forms: list,
-        prefix_amount: int
     ) -> None:
         """Отправляет запрос к API Склада, создает заявку на доставку."""
         for form in delivery_forms:
@@ -155,13 +158,13 @@ class MakeOrdersForGuru():
                 json=form,
             )
 
-            print(response.json())
-            print(form)
-
             if response.status_code != HTTPStatus.OK:
                 raise ConnectionError(
                     'Запрос к API склада не увенчался успехом.'
                 )
+
+            if 'errors' in response.json():
+                logging.error(response.json()['str'])
 
 
 class YANDEX(MakeOrdersForGuru):
@@ -233,34 +236,57 @@ class YANDEX(MakeOrdersForGuru):
     ) -> MakeOrdersForGuru:
         """Вытягивает данные из ответа API для доставки."""
         delivery_forms = []
-        items_list = []
         barcodes_forms = []
         for order in page_list:
+            items_list = []
+            date_dost = self.data_valid(
+                order['delivery']['shipments']
+                [0]['shipmentDate'].replace('-', '.')
+            )
             for item in order['items']:
                 items_list.append(self.item_form_validation(
                     amount=item['count'],
                     offer_id=str(item['offerId'])
                 ))
-            barcodes_forms.append(self.get_barcode_marketplace(
+
+            delivery_forms += [
+                super().delivery_form_validation(
+                    order_number=('q-' + str(order['id'])),
+                    date_dost=date_dost,
+                    items_list=items_list
+                )
+            ]
+            barcodes_forms.append(
+                self.get_barcode_marketplace(
                     name='yandex',
                     order_id=str(order['id']),
-                    prefix='Y-'
-                ))
-            delivery_form = super().delivery_form_validation(
-                order_number='Y-' + str(order['id']),
-                date_dost=self.data_valid(
-                    order['delivery']['shipments']
-                    [0]['shipmentDate'].replace('-', '.')
-                ),
-                items_list=items_list
+                    prefix='q-'
+                )
             )
-            delivery_forms.append(delivery_form)
 
         return self.make_order(delivery_forms, barcodes_forms)
 
     def make_order(self, delivery_forms: list, barcodes_forms: list) -> None:
         """Делает запрос и скачивает наклейки."""
-        self.send_request_to_shipment(delivery_forms, 2)
+        self.send_request_to_shipment(delivery_forms)
+        time.sleep(10)
+        self.send_barcode(barcodes_forms)
+        print('все ок')
+
+
+def check_tokens() -> bool:
+    """Проверка всех токенов на валидность."""
+    return all((
+        DELIVERY_PARTNER_ID, DELIVERY_KEY,
+        OZON_TOKEN, OZON_ID,
+        OZON_HEADERS, OZON_PARAMS,
+        OZON_MATVEEVSKAYA_MARKETPLACE,
+        YANDEX_CAMP_ID, YANDEX_TOKEN,
+        YANDEX_CLIENT_ID, YANDEX_MARKETPLACE,
+        YANDEX_HEADERS, YANDEX_PARAMS,
+        BASE_YANDEX_URL, BASE_URL_DELIVERY,
+        BARCODE_DELIVERY_URL, BASE_URL_OZON
+    ))
 
 
 def call_yandex() -> None:
@@ -287,6 +313,25 @@ def call_yandex() -> None:
         YANDEX().order_data_compose(page)
 
 
+def call_ozon() -> None:
+    barcodes_list = []
+    clean_pdf()
+    # Запрос к API OZON
+    ozon_orders = get_list_request_ozon()
+    # Получение списка товаров для длоставки
+    get_products = get_orders_for_delivery(ozon_orders)
+    # Формирование списка товаров для доставки, в ее формате
+    make_order_list = data_ordning_ozon(get_products)
+    # Отправление запроса к доставке, и загрузка штрих-кодов
+    for order in make_order_list:
+        barcodes_list.append(
+            send_request_to_shipment(order)
+        )
+    time.sleep(10)
+    for barcode in barcodes_list:
+        send_barcodes(barcode)
+
+
 def clean_pdf() -> None:
     """Очищает все штрих кода по завершению."""
     dirs = ['./yandex/pdf', './ozon/pdf', './sber/pdf']
@@ -307,12 +352,22 @@ def main():
             'status:%(levelname)s \n'
             'info:%(message)s \n')
     )
+
+    if not check_tokens():
+        logging.critical('Ошибка с инициализацией Токенов.')
+        sys.exit('Ошибка, токены не заданы или заданы, но неправильно.')
+
     while True:
         try:
             clean_pdf()
-            call_yandex()
+            # call_yandex()
+            logging.info('Заказы с Яндекс создались.')
+            call_ozon()
+            logging.info('Заказы с OZON создались.')
         except Exception as error:
             logging.error(error, traceback)
+        finally:
+            break
 
 
 if __name__ == '__main__':
