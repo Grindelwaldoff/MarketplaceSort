@@ -88,7 +88,7 @@ def get_orders(response: dict) -> list:
 
 
 def get_barcode(article: list) -> str:
-    """Обращается к OZON и берет штрихкод у товара для его поиска на складе."""
+    """Обращается к YANDEX и берет штрихкод у товара для его поиска на складе."""
     json = {
         "partner_id": DELIVERY_PARTNER_ID,
         "key": DELIVERY_KEY
