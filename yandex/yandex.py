@@ -50,7 +50,7 @@ def request(url: str, headers: dict, params: dict) -> dict:
     response = requests.get(
         url,
         headers=headers,
-        params=params
+        json=params
     )
 
     print(response.json())
