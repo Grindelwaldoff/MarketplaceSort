@@ -1,4 +1,5 @@
 import os
+from datetime import datetime as dt, timedelta
 
 from dotenv import load_dotenv
 
@@ -18,17 +19,21 @@ OZON_HEADERS = {
     'Content-Type': 'application/json'
 }
 
+current_date = str(dt.utcnow().isoformat()+'Z')
+
 OZON_PARAMS = {
         "dir": "ASC",
         "filter":
         {
-            "since": "",
+            "since": str((
+                dt.utcnow() - timedelta(days=7)).isoformat()
+            ) + 'Z',
             "status": "awaiting_deliver",
-            "to": ""
+            "to": current_date
         },
-        "limit": 1000,
+        "limit": 100,
         "offset": 0
-}
+    }
 
 YANDEX_CAMP_ID = os.getenv('YANDEX_CAMPAIGN_ID')
 YANDEX_TOKEN = os.getenv('YANDEX_TOKEN')

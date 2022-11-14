@@ -53,7 +53,7 @@ class MakeOrdersForGuru():
             "ed": "шт",
             "code": offer_id,
             "oc": 100,
-            "bare": f"{randint(0, 100000000)}",  # self.get_barcode_delivery_catalog(offer_id)
+            "bare": self.get_barcode_delivery_catalog(offer_id),  # self.get_barcode_delivery_catalog(offer_id)
             "mono": 0,
             "mark": 0,
             "pack": 0
@@ -117,6 +117,16 @@ class MakeOrdersForGuru():
         except Exception as error:
             raise Exception(error)
 
+    def write_down_barcode_file(
+        self, name: str,
+        order_id: str, prefix: str,
+        response
+    ) -> None:
+        with open(f'./{name}/pdf/{order_id}.pdf', 'wb') as file:
+            file.write(response._content)
+
+        return self.json_barcode_to_delivery(name, order_id, prefix=prefix)
+
     def json_barcode_to_delivery(
         self, name, order_id: str, prefix: str
     ) -> dict:
@@ -142,13 +152,14 @@ class MakeOrdersForGuru():
                 BARCODE_DELIVERY_URL,
                 json=form,
             )
-            print(response.json(), BARCODE_DELIVERY_URL)
 
-            if response.status_code != HTTPStatus.OK:
-                raise ConnectionError(
-                    'Запрос к API отвечающим за штрих-код'
-                    ' не увенчался успехом.'
-                )
+            return response
+
+            # if response.status_code != HTTPStatus.OK:
+            #     raise ConnectionError(
+            #         'Запрос к API отвечающим за штрих-код'
+            #         ' не увенчался успехом.'
+            #     )
 
     def send_request_to_shipment(
         self, delivery_forms: list,
@@ -159,16 +170,21 @@ class MakeOrdersForGuru():
                 BASE_URL_DELIVERY,
                 json=form,
             )
-
-            if response.status_code != HTTPStatus.OK:
-                raise ConnectionError(
-                    'Запрос к API склада не увенчался успехом.'
-                )
+            # if response.status_code != HTTPStatus.OK:
+            #     raise ConnectionError(
+            #         'Запрос к API склада не увенчался успехом.'
+            #     )
 
             print(response.json(), BARCODE_DELIVERY_URL)
 
             if 'errors' in response.json():
                 logging.error(response.json()['str'])
+
+    def make_order(self, delivery_forms: list, barcode_forms: list) -> None:
+        """Основная функция класса - отправляет запросы к API."""
+        self.send_request_to_shipment(delivery_forms=delivery_forms)
+        time.sleep(0)
+        self.send_barcode(barcode_forms=barcode_forms)
 
 
 class Yandex(MakeOrdersForGuru):
@@ -224,10 +240,10 @@ class Yandex(MakeOrdersForGuru):
         )
 
         response = requests.get(url, headers=YANDEX_HEADERS)
-        with open(f'./{name}/pdf/{order_id}.pdf', 'wb') as file:
-            file.write(response._content)
-
-        return self.json_barcode_to_delivery(name, order_id, prefix=prefix)
+        return self.write_down_barcode_file(
+            name=name, order_id=order_id,
+            prefix=prefix, response=response
+        )
 
     def data_valid(self, data: int) -> str:
         """Меняет формат даты, который вернул API."""
@@ -270,27 +286,12 @@ class Yandex(MakeOrdersForGuru):
 
         return self.make_order(delivery_forms, barcodes_forms)
 
-    def make_order(self, delivery_forms: list, barcodes_forms: list) -> None:
-        """Делает запрос и скачивает наклейки."""
-        self.send_request_to_shipment(delivery_forms)
-        time.sleep(10)
-        self.send_barcode(barcodes_forms)
-
 
 class Ozon(MakeOrdersForGuru):
     """Класс для получения заказов с OZON."""
 
     def market_place_request(self) -> dict:
         """Обращение к  API OZON."""
-        OZON_PARAMS.update(
-            {
-                'filter': {
-                    'since': (
-                        dt.utcnow() - timedelta(days=7)).isoformat() + 'Z',
-                    'to': dt.utcnow().isoformat()+'Z'
-                }
-            }
-        )
         response = requests.post(
             url=BASE_URL_OZON,
             headers=OZON_HEADERS,
@@ -322,30 +323,33 @@ class Ozon(MakeOrdersForGuru):
     ) -> None:
         """Функция скачивает штрих-кода из магазина."""
         print(order_id)
-        url = (
-            'https://api-seller.ozon.ru/v2/posting/fbs/package-label'
-        )
-        json_ozon = {
-            'posting_number': [
+        json = {
+            "posting_number": [
                 order_id
             ]
         }
-        response = requests.post(url, json=json_ozon, headers=OZON_HEADERS)
-        print(response.json(), response.status_code)
+        print(OZON_HEADERS, json)
+
+        response = requests.post(
+            'https://api-seller.ozon.ru/v2/posting/fbs/package-label',
+            json=json,
+            headers=OZON_HEADERS
+        )
         if response.status_code != HTTPStatus.OK:
             raise ConnectionError(
-                'Запрос к API OZON отвечающим за штрих-код'
-                ' не увенчался успехом.'
+                'Невозможно скачать штрих-код.',
+                response.status_code
             )
-        with open(f'./{name}/pdf/{order_id}.pdf', 'wb') as file:
-            file.write(response._content)
 
-        return self.json_barcode_to_delivery(name, order_id, prefix=prefix)
+        return self.write_down_barcode_file(
+            name=name, order_id=order_id,
+            prefix=prefix, response=response
+        )
 
     def order_data_compose(self, order_list: dict) -> None:
         """Вытягивает данные из ответа API для доставки."""
         delivery_forms = []
-        barcodes_forms = []
+        barcode_forms = []
         for order in order_list:
             items_list = []
             date_dost = order["shipment_date"][:10].replace('-', '.')
@@ -361,21 +365,15 @@ class Ozon(MakeOrdersForGuru):
                     items_list=items_list
                 )
             ]
-            barcodes_forms.append(
+            barcode_forms.append(
                 self.get_barcode_marketplace(
                     name='ozon',
-                    order_id=order['posting_number'],
+                    order_id=str(order['posting_number']),
                     prefix='2P-'
                 )
             )
 
-        return self.make_order(delivery_forms, barcodes_forms)
-
-    def make_order(self, delivery_forms: list, barcodes_forms: list) -> None:
-        """Основная функция класса - отправляет запросы к API."""
-        self.send_request_to_shipment(delivery_forms=delivery_forms)
-        time.sleep(10)
-        self.send_barcode(barcodes_forms=barcodes_forms)
+        return self.make_order(delivery_forms, barcode_forms)
 
 
 def check_tokens() -> bool:
@@ -450,14 +448,12 @@ def main():
     while True:
         try:
             clean_pdf()
-            # call_Yandex()
+            call_Yandex()
             logging.info('Заказы с Яндекс создались.')
             call_ozon()
             logging.info('Заказы с OZON создались.')
         except Exception as error:
             logging.error(error, traceback)
-        finally:
-            break
 
 
 if __name__ == '__main__':

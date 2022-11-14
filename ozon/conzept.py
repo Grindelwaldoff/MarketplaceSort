@@ -115,6 +115,8 @@ def download_pdf_barcode(posting_number: str):
         ]
     }
 
+    print(OZON_HEADERS, json)
+
     response = requests.post(
         'https://api-seller.ozon.ru/v2/posting/fbs/package-label',
         json=json,
