@@ -26,7 +26,7 @@ OZON_PARAMS = {
             "status": "awaiting_deliver",
             "to": ""
         },
-        "limit": 100,
+        "limit": 1000,
         "offset": 0
 }
 

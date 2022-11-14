@@ -92,6 +92,7 @@ class MakeOrdersForGuru():
         raise KeyError('Marketplace undefined.')
 
     def get_barcode_delivery_catalog(self, article: str) -> str:
+        """Берет штрих-код из каталога склада."""
         json = {
             "partner_id": DELIVERY_PARTNER_ID,
             "key": DELIVERY_KEY
@@ -145,7 +146,8 @@ class MakeOrdersForGuru():
 
             if response.status_code != HTTPStatus.OK:
                 raise ConnectionError(
-                    'Запрос к API отвечающим за штрих-код не увенчался успехом.'
+                    'Запрос к API отвечающим за штрих-код'
+                    ' не увенчался успехом.'
                 )
 
     def send_request_to_shipment(
@@ -163,11 +165,13 @@ class MakeOrdersForGuru():
                     'Запрос к API склада не увенчался успехом.'
                 )
 
+            print(response.json(), BARCODE_DELIVERY_URL)
+
             if 'errors' in response.json():
                 logging.error(response.json()['str'])
 
 
-class YANDEX(MakeOrdersForGuru):
+class Yandex(MakeOrdersForGuru):
     """Получение списка заказов с Яндекс."""
 
     def market_place_request(self) -> dict:
@@ -191,7 +195,7 @@ class YANDEX(MakeOrdersForGuru):
         return response.json()
 
     def get_orders(self, response: dict) -> MakeOrdersForGuru:
-        """Забирает заказы из ответа YANDEX API."""
+        """Забирает заказы из ответа Yandex API."""
         if not response.get('orders'):
             raise Exception(
                 'Yandex не вернул в ответе списко заказов.'
@@ -251,7 +255,7 @@ class YANDEX(MakeOrdersForGuru):
 
             delivery_forms += [
                 super().delivery_form_validation(
-                    order_number=('q-' + str(order['id'])),
+                    order_number=('Y-' + str(order['id'])),
                     date_dost=date_dost,
                     items_list=items_list
                 )
@@ -260,7 +264,7 @@ class YANDEX(MakeOrdersForGuru):
                 self.get_barcode_marketplace(
                     name='yandex',
                     order_id=str(order['id']),
-                    prefix='q-'
+                    prefix='Y-'
                 )
             )
 
@@ -271,7 +275,107 @@ class YANDEX(MakeOrdersForGuru):
         self.send_request_to_shipment(delivery_forms)
         time.sleep(10)
         self.send_barcode(barcodes_forms)
-        print('все ок')
+
+
+class Ozon(MakeOrdersForGuru):
+    """Класс для получения заказов с OZON."""
+
+    def market_place_request(self) -> dict:
+        """Обращение к  API OZON."""
+        OZON_PARAMS.update(
+            {
+                'filter': {
+                    'since': (
+                        dt.utcnow() - timedelta(days=7)).isoformat() + 'Z',
+                    'to': dt.utcnow().isoformat()+'Z'
+                }
+            }
+        )
+        response = requests.post(
+            url=BASE_URL_OZON,
+            headers=OZON_HEADERS,
+            json=OZON_PARAMS
+        )
+        if response.status_code != HTTPStatus.OK:
+            raise ConnectionError('Запрос к API не увенчался успехом.')
+
+        return self.get_orders(response.json())
+
+    def get_orders(self, response: dict) -> list:
+        """Выборка заказов из результата  API. Также их валидация."""
+        if not response.get('result'):
+            raise Exception(
+                'OZON не ответил, результат не возвращается.'
+                'Запрос к API удачен.'
+            )
+
+        if response.get('result')['postings'] == []:
+            logging.info('Заказов пока нет.')
+
+        if not isinstance(response.get('result')['postings'], list):
+            raise TypeError('OZON вернул список заказов в другом формате.')
+
+        return self.order_data_compose(response.get('result')['postings'])
+
+    def get_barcode_marketplace(
+        self, name: str, order_id: str, prefix: str
+    ) -> None:
+        """Функция скачивает штрих-кода из магазина."""
+        print(order_id)
+        url = (
+            'https://api-seller.ozon.ru/v2/posting/fbs/package-label'
+        )
+        json_ozon = {
+            'posting_number': [
+                order_id
+            ]
+        }
+        response = requests.post(url, json=json_ozon, headers=OZON_HEADERS)
+        print(response.json(), response.status_code)
+        if response.status_code != HTTPStatus.OK:
+            raise ConnectionError(
+                'Запрос к API OZON отвечающим за штрих-код'
+                ' не увенчался успехом.'
+            )
+        with open(f'./{name}/pdf/{order_id}.pdf', 'wb') as file:
+            file.write(response._content)
+
+        return self.json_barcode_to_delivery(name, order_id, prefix=prefix)
+
+    def order_data_compose(self, order_list: dict) -> None:
+        """Вытягивает данные из ответа API для доставки."""
+        delivery_forms = []
+        barcodes_forms = []
+        for order in order_list:
+            items_list = []
+            date_dost = order["shipment_date"][:10].replace('-', '.')
+            for item in order['products']:
+                items_list.append(self.item_form_validation(
+                    amount=item['quantity'],
+                    offer_id=str(item['offer_id'])
+                ))
+            delivery_forms += [
+                super().delivery_form_validation(
+                    order_number=('2P-' + str(order['posting_number'])),
+                    date_dost=date_dost,
+                    items_list=items_list
+                )
+            ]
+            barcodes_forms.append(
+                self.get_barcode_marketplace(
+                    name='ozon',
+                    order_id=order['posting_number'],
+                    prefix='2P-'
+                )
+            )
+
+        return self.make_order(delivery_forms, barcodes_forms)
+
+    def make_order(self, delivery_forms: list, barcodes_forms: list) -> None:
+        """Основная функция класса - отправляет запросы к API."""
+        self.send_request_to_shipment(delivery_forms=delivery_forms)
+        time.sleep(10)
+        self.send_barcode(barcodes_forms=barcodes_forms)
 
 
 def check_tokens() -> bool:
@@ -289,10 +393,10 @@ def check_tokens() -> bool:
     ))
 
 
-def call_yandex() -> None:
+def call_Yandex() -> None:
     """Функция обращения к YM API."""
-    response = YANDEX().market_place_request()
-    order_pages = [YANDEX().get_orders(response)]
+    response = Yandex().market_place_request()
+    order_pages = [Yandex().get_orders(response)]
 
     if (response['pager']['pagesCount']
             != response['pager']['currentPage']):
@@ -306,30 +410,16 @@ def call_yandex() -> None:
                     {'page': response['pager']['currentPage'] + 1}
                 )
             )
-            check_response = YANDEX().get_orders(response)
+            check_response = Yandex().get_orders(response)
             order_pages.append(check_response)
 
     for page in order_pages:
-        YANDEX().order_data_compose(page)
+        Yandex().order_data_compose(page)
 
 
 def call_ozon() -> None:
-    barcodes_list = []
-    clean_pdf()
-    # Запрос к API OZON
-    ozon_orders = get_list_request_ozon()
-    # Получение списка товаров для длоставки
-    get_products = get_orders_for_delivery(ozon_orders)
-    # Формирование списка товаров для доставки, в ее формате
-    make_order_list = data_ordning_ozon(get_products)
-    # Отправление запроса к доставке, и загрузка штрих-кодов
-    for order in make_order_list:
-        barcodes_list.append(
-            send_request_to_shipment(order)
-        )
-    time.sleep(10)
-    for barcode in barcodes_list:
-        send_barcodes(barcode)
+    """Функция обращения к OZON."""
+    Ozon().market_place_request()
 
 
 def clean_pdf() -> None:
@@ -360,7 +450,7 @@ def main():
     while True:
         try:
             clean_pdf()
-            # call_yandex()
+            # call_Yandex()
             logging.info('Заказы с Яндекс создались.')
             call_ozon()
             logging.info('Заказы с OZON создались.')

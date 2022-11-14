@@ -125,7 +125,7 @@ def download_pdf_barcode(posting_number: str):
         raise ConnectionError('Невозможно скачать штрих-код.', response.status_code)
 
     with open(f'./ozon/pdf/{posting_number}.pdf', 'wb') as file:
-        file.write(response.content)
+        file.write(response._content)
         return True
 
 
@@ -139,7 +139,7 @@ def json_barcode_from_ozon_to_delivery(posting_number: str) -> dict:
             "type": 2,
             "copy": 1,
             "name": str(posting_number) + ".pdf",
-            "order_number": "2l-" + posting_number,
+            "order_number": "2P-" + posting_number,
             "file": base64.b64encode(file.read()).decode('UTF-8')
         }
 
@@ -154,7 +154,7 @@ def data_ordning_ozon(data: list) -> list:
             order = {
                 "partner_id": DELIVERY_PARTNER_ID,
                 "key": DELIVERY_KEY,
-                "order_number": '2l-' + posting['posting_number'],
+                "order_number": '2P-' + posting['posting_number'],
                 "usluga": "ДОСТАВКА",
                 "marketplace_id": OZON_MATVEEVSKAYA_MARKETPLACE,
                 "sposob_dostavki": "Маркетплейс",
