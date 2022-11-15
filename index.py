@@ -83,7 +83,7 @@ class MakeOrdersForGuru():
             "cont_mail": "bibalaev@gmail.com",
             "region_iz": "Москва",
             "ocen_sum": 100,
-            "free_date": "0",
+            "free_date": "1",
             "date_dost": date_dost
         }
         order_form.update({"products": items_list})
@@ -148,7 +148,8 @@ class MakeOrdersForGuru():
                 BARCODE_DELIVERY_URL,
                 json=form,
             )
-            print(response._content)
+
+            print(response.json())
             # if response.status_code != HTTPStatus.OK:
             #     raise ConnectionError(
             #         'Запрос к API отвечающим за штрих-код'
@@ -500,24 +501,18 @@ def main():
         logging.critical('Ошибка с инициализацией Токенов.')
         sys.exit('Ошибка, токены не заданы или заданы, но неправильно.')
 
-    while True:
-        if dt.now().hour == CHECK_HOUR:
-            try:
-                if dt.now().hour == 20:
-                    call_Yandex()
-                    logging.info('Заказы с Яндекс создались.')
-            except Exception as error:
-                logging.error(error, traceback)
-            try:
-                call_ozon()
-                logging.info('Заказы с OZON создались.')
-                clean_pdf()
-                time.sleep(3600)
-            except Exception as error:
-                logging.error(error, traceback)
-                time.sleep(3600)
-        else:
-            time.sleep(3600)
+    try:
+        call_Yandex()
+        logging.info('Заказы с Яндекс создались.')
+    except Exception as error:
+        logging.error(error, traceback)
+
+    try:
+        call_ozon()
+        logging.info('Заказы с OZON создались.')
+        clean_pdf()
+    except Exception as error:
+        logging.error(error, traceback)
 
 
 if __name__ == '__main__':
