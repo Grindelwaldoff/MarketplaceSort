@@ -16,7 +16,9 @@ OZON_ID = os.getenv('OZON_ID')
 OZON_TOKEN_2 = os.getenv('OZON_TOKEN_2')
 OZON_ID_2 = os.getenv('OZON_ID_2')
 OZON_MATVEEVSKAYA_MARKETPLACE = os.getenv('OZON_MARKETPLACE')
+
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+TELEGRAM_TOKEN_2 = os.getenv('TELEGRAM_TOKEN_2')
 TELEGRAM_CHAT_ID = os.getenv('CHAT_ID')
 
 OZON_HEADERS = {
@@ -64,6 +66,38 @@ YANDEX_HEADERS = {
     'Content-Type': 'application/json;charset=utf-8'
 }
 
+WB_HEADERS = {
+    'Authorization': os.getenv('WB_TOKEN'),
+    'Content-Type': 'application/json'
+}
+
+SBER_HEADERS = {
+    'Content-Type': 'application/json',
+    'User-Agent': 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:107.0) Gecko/20100101 Firefox/107.0'
+}
+
+SBER_PARAMS_GET = {
+    "meta": {},
+    "data": {
+        "token": os.getenv('SBER_TOKEN'),
+        "shipments": [
+        ]
+    }
+}
+
+SBER_PARAMS_SEARCH = {
+    "data": {
+        "token": os.getenv('SBER_TOKEN'),
+        "dateFrom": "2021-04-17T21:00:00Z",
+        "dateTo": "2021-05-19T20:59:59Z",
+        "count": 10,
+        "statuses": [
+            "CONFIRMED",
+        ]
+    },
+    "meta": {}
+}
+
 main_order_form = {
     'partner_id': DELIVERY_PARTNER_ID,
     'key': DELIVERY_KEY,
@@ -88,7 +122,7 @@ item_form = {
     'ed': 'шт',
     'code': '',
     'oc': 100,
-    'bare': '',  # self.get_barcode_delivery_catalog(offer_id)
+    'bare': '',
     'mono': 0,
     'mark': 0,
     'pack': 0

@@ -23,24 +23,216 @@ from constants.data import (
 )
 from constants.urls import (
     BASE_YANDEX_URL, BASE_URL_DELIVERY,
-    BARCODE_DELIVERY_URL, BASE_URL_OZON
+    BARCODE_DELIVERY_URL, BASE_URL_OZON, OZON_ACTS, OZON_WAYBILL,
+    YANDEX_ACTS, OZON_ACTS_CREATE
 )
-import acts
-import barcodes
 
-
-OZON_BAR_LIST_K = {}
-OZON_BAR_LIST_2P = {}
-YANDEX_BAR_LIST = {}
-
-OZON_ACTS_DATA_K = {}
-OZON_ACTS_DATA_2P = {}
-YANDEX_ACTS_DATA = {}
 
 BASE_DIR = os.path.dirname(__file__)
 
 BOT = Bot(token=TELEGRAM_TOKEN)
 BOT_FOR_LOGS = Bot(token=TELEGRAM_TOKEN_2)
+
+
+class YandexActs():
+    """Класс работающий с актами Yandex."""
+
+    def download(
+        self,
+        order_id: int
+    ) -> None:
+        response = requests.get(
+            YANDEX_ACTS,
+            headers=YANDEX_HEADERS,
+        )
+        print(response.status_code, order_id)
+        if response.status_code != HTTPStatus.OK:
+            raise ConnectionError(
+                'Невозможно скачать акт из Yandex.',
+                response.json()
+            )
+        with open(f'./yandex/acts/{order_id}.pdf', 'wb') as file:
+            file.write(response._content)
+
+        download_form = MakeOrdersForGuru().json_barcode_to_delivery_form(
+            folder='acts',
+            name='yandex',
+            order_id=str(order_id),
+            prefix='Y-'
+        )
+
+        return Barcode().send_barcode(
+            download_form
+        )
+
+
+class OzonActs():
+    """Класс работающий с OZON актами."""
+
+    def download(
+        self, delivery_id: int,
+        prefix: str, date: str, order_id: int
+    ) -> None:
+        if prefix == '2P-':
+            headers = OZON_HEADERS
+        else:
+            headers = OZON_HEADERS_2
+
+        json = {
+            "delivery_method_id": delivery_id,
+            "departure_date": date
+        }
+        response = requests.post(
+            OZON_ACTS_CREATE,
+            json=json,
+            headers=headers
+        )
+        if response.status_code != HTTPStatus.OK:
+            raise ConnectionError(
+                'На данную отгрузку нельзя скачать акт.',
+                delivery_id
+            )
+        time.sleep(300)
+        self.send_act(
+            id=response.json().get('result')['id'],
+            headers=headers,
+            order_id=order_id,
+            prefix=prefix
+        )
+        self.send_waybill(
+            id=response.json().get('result')['id'],
+            headers=headers,
+            order_id=order_id,
+            prefix=prefix
+        )
+
+    def send_waybill(
+        self, id: int, headers: dict,
+        order_id: str, prefix: str
+    ) -> None:
+        response = requests.post(
+            OZON_WAYBILL,
+            json={
+                'id': id
+            },
+            headers=headers
+        )
+        print(response.status_code, order_id)
+        if response.status_code != HTTPStatus.OK:
+            raise ConnectionError(
+                'Невозможно скачать накладную.',
+                response.status_code, order_id
+            )
+        with open(f'./ozon/waybills/{order_id}.pdf', 'wb') as file:
+            file.write(response._content)
+
+        waybill_form = MakeOrdersForGuru().json_barcode_to_delivery_form(
+            folder='waybills',
+            name='ozon',
+            order_id=order_id,
+            prefix=prefix
+        )
+
+        return Barcode().send_barcode(waybill_form)
+
+    def send_act(
+        self, id: int, headers: dict,
+        prefix: str, order_id: str
+    ) -> None:
+        json = {
+            "id": id,
+            "doc_type": "act_of_acceptance"
+        }
+        response = requests.post(
+            OZON_ACTS, json=json, headers=headers
+        )
+        print(response.status_code, order_id)
+        if response.status_code != HTTPStatus.OK:
+            raise ConnectionError(
+                'Невозможно скачать акт.',
+                response.status_code, order_id
+            )
+        with open(f'./ozon/acts/{order_id}.pdf', 'wb') as file:
+            file.write(response._content)
+
+        act_form = MakeOrdersForGuru().json_barcode_to_delivery_form(
+            folder='acts',
+            name='ozon',
+            order_id=order_id,
+            prefix=prefix
+        )
+
+        return Barcode().send_barcode(act_form)
+
+
+class Barcode():
+    """Класс работающий со штрих-кодами."""
+
+    def download(
+        self, barcode_list: list,
+        marketplace: str, prefix: str
+    ) -> None:
+        """Функция скачивает штрих-кода из магазина."""
+        for order_id in barcode_list:
+            order_id = order_id[len(prefix)::]
+            if marketplace == 'Yandex':
+                url = (
+                    'https://api.partner.market.yandex.ru/v2/campaigns'
+                    f'/{YANDEX_CAMP_ID}/orders/{order_id}/delivery/labels'
+                )
+
+                response = requests.get(url, headers=YANDEX_HEADERS)
+                with open(f'./yandex/pdf/{order_id}.pdf', 'wb') as file:
+                    file.write(response._content)
+
+                barcode_form = MakeOrdersForGuru(
+                ).json_barcode_to_delivery_form(
+                    folder='pdf',
+                    name='yandex', order_id=order_id, prefix=prefix
+                )
+
+                self.send_barcode(barcode_form=barcode_form)
+
+            if marketplace == 'Ozon' and len(barcode_list) < 20:
+                if prefix == '2P-':
+                    headers = OZON_HEADERS
+                else:
+                    headers = OZON_HEADERS_2
+
+                json = {
+                    "posting_number": [order_id]
+                }
+
+                response = requests.post(
+                    'https://api-seller.ozon.ru/v2/posting/fbs/package-label',
+                    json=json,
+                    headers=headers
+                )
+                if response.status_code != HTTPStatus.OK:
+                    raise ConnectionError(
+                        'Невозможно скачать штрих-код.',
+                        response.json()
+                    )
+
+                with open(f'./ozon/pdf/{order_id}.pdf', 'wb') as file:
+                    file.write(response._content)
+
+                barcode_form = MakeOrdersForGuru(
+                ).json_barcode_to_delivery_form(
+                    folder='pdf',
+                    name='ozon', order_id=order_id, prefix=prefix
+                )
+
+                self.send_barcode(barcode_form=barcode_form)
+
+    def send_barcode(self, barcode_form: dict) -> None:
+        """Отправляет штрих-кода на склад."""
+        response = requests.post(
+            BARCODE_DELIVERY_URL,
+            json=barcode_form,
+        )
+
+        print(response.json())
 
 
 class MakeOrdersForGuru():
@@ -63,7 +255,7 @@ class MakeOrdersForGuru():
     ) -> list:
         """Формирует список товаров."""
         item = {
-            "name": self.get_product_name(offer_id),
+            "name": "Товар",
             "qty": amount,
             "ed": "шт",
             "code": offer_id,
@@ -74,32 +266,6 @@ class MakeOrdersForGuru():
             "pack": 0
         }
         return item
-
-    def get_product_name(self, offer_id):
-        """Берет наименование из каталога склада."""
-        json = {
-            "partner_id": DELIVERY_PARTNER_ID,
-            "key": DELIVERY_KEY
-        }
-
-        try:
-            response = requests.post(
-                'https://api.dostavka.guru/methods/stocks/',
-                json=json
-            )
-
-            if response.status_code != HTTPStatus.OK:
-                raise ConnectionError(
-                    'Запрос к API каталога склада не увенчался успехом.'
-                )
-
-            catalog = response.json()
-
-            for item in catalog['msk-01']:  # не работает на тестовом аккаунте склада
-                if item['article'] == offer_id:
-                    return item['name']
-        except Exception as error:
-            raise Exception(error)
 
     def delivery_form_validation(
         self, order_number: str,
@@ -189,33 +355,21 @@ class MakeOrdersForGuru():
                 )
             else:
                 print(response.json())
-                if 'errors' in response.json():
-                    print(form['order_number'])
-                    barcode_list.remove(str(form['order_number']))
-                else:
-                    stat_list.append(form)
+                print(form['order_number'])
+                stat_list.append(form)
 
-        if prefix == 'Y-' and barcode_list != []:
-            YANDEX_BAR_LIST.update({
-                "barcode_list": barcode_list,
-                "marketplace": marketplace,
-                "prefix": prefix,
-                "stat_list": self.get_order_list_for_tg(stat_list)
-            })
-        if prefix == '2P-' and barcode_list != []:
-            OZON_BAR_LIST_2P.update({
-                "barcode_list": barcode_list,
-                "marketplace": marketplace,
-                "prefix": prefix,
-                "stat_list": self.get_order_list_for_tg(stat_list)
-            })
-        if prefix == 'K-' and barcode_list != []:
-            OZON_BAR_LIST_K.update({
-                "barcode_list": barcode_list,
-                "marketplace": marketplace,
-                "prefix": prefix,
-                "stat_list": self.get_order_list_for_tg(stat_list)
-            })
+        time.sleep(10)
+        Barcode().download(
+            barcode_list=barcode_list,
+            marketplace=marketplace,
+            prefix=prefix
+        )
+        order_info = self.get_order_list_for_tg(stat_list)
+        message = (
+            f'{marketplace} обработано {len(stat_list)} заказов: \n'
+            + order_info
+        )
+        send_message(BOT, message=message)
 
     def tg_date_format(self, date: str) -> str:
         """Меняет формат даты для тг бота."""
@@ -327,9 +481,13 @@ class Yandex(MakeOrdersForGuru):
                     tommorow in order['delivery']['shipments']
                     [0]['shipmentDate']
                 ):
-                    YANDEX_ACTS_DATA.update({
-                        "order_id": order['id']
-                    })
+                    YandexActs().download(
+                        order_id=order['id']
+                    )
+                    send_message(
+                        BOT,
+                        f'Акт загружен в заказ под номером Y-{ + order["id"]}'
+                    )
                     break
             except Exception as error:
                 raise ConnectionError(
@@ -412,28 +570,19 @@ class Ozon(MakeOrdersForGuru):
 
         for order in order_list:
             if tommorow in order['shipment_date']:
-                if prefix == '2P-':
-                    OZON_ACTS_DATA_2P.update({
-                            "delivery_id": order['delivery_method'].get('id'),
-                            "prefix": prefix,
-                            "date": str(
-                                (
-                                    dt.utcnow() + timedelta(hours=23)
-                                ).isoformat()+'Z'
-                            ),
-                            "order_id": order['posting_number']
-                        })
-                else:
-                    OZON_ACTS_DATA_K.update({
-                            "delivery_id": order['delivery_method'].get('id'),
-                            "prefix": prefix,
-                            "date": str(
-                                (
-                                    dt.utcnow() + timedelta(hours=23)
-                                ).isoformat()+'Z'
-                            ),
-                            "order_id": order['posting_number']
-                        })
+                OzonActs().download(
+                    delivery_id=order['delivery_method'].get('id'),
+                    prefix=prefix,
+                    date=str(
+                        (dt.utcnow() + timedelta(hours=23)).isoformat()+'Z'
+                    ),
+                    order_id=order['posting_number']
+                )
+                send_message(
+                    BOT,
+                    'Акты прикреплены в '
+                    f'{prefix + order["posting_number"]}'
+                )
                 break
 
 
@@ -531,17 +680,29 @@ def main():
         logging.error(error)
         send_message(BOT_FOR_LOGS, str(error))
 
-    try:
-        call_Yandex()
-        logging.info('Заказы с Яндекс создались.')
-        send_message(
-            BOT,
-            f'Акт будет загружен в заказ под номером Y-{ + YANDEX_ACTS_DATA["order_id"]}'
-        )
-        clean_pdf()
-    except Exception as error:
-        logging.error(error)
-        send_message(BOT_FOR_LOGS, str(error))
+    # try:
+    #     call_wb()
+    #     logging.info('Заказы с Яндекс создались.')
+    #     clean_pdf()
+    # except Exception as error:
+    #     logging.error(error)
+    #     send_message(BOT_FOR_LOGS, str(error))
+
+    # try:
+    #     call_sber()
+    #     logging.info('Заказы с Яндекс создались.')
+    #     clean_pdf()
+    # except Exception as error:
+    #     logging.error(error)
+    #     send_message(BOT_FOR_LOGS, str(error))
+
+    # try:
+    #     call_Yandex()
+    #     logging.info('Заказы с Яндекс создались.')
+    #     clean_pdf()
+    # except Exception as error:
+    #     logging.error(error)
+    #     send_message(BOT_FOR_LOGS, str(error))
 
     try:
         Ozon().market_place_request(prefix='2P-')
@@ -551,114 +712,13 @@ def main():
         logging.error(error)
         send_message(BOT_FOR_LOGS, str(error))
 
-    try:
-        Ozon().market_place_request(prefix='K-')
-        logging.info('Заказы с OZON создались.')
-        clean_pdf()
-    except Exception as error:
-        logging.error(error)
-        send_message(BOT_FOR_LOGS, str(error))
-
-    try:
-        time.sleep(10)
-        print(OZON_BAR_LIST_K)
-        barcodes.Barcode().download(
-            barcode_list=OZON_BAR_LIST_K['barcode_list'],
-            marketplace=OZON_BAR_LIST_K['marketplace'],
-            prefix=OZON_BAR_LIST_K['prefix'],
-        )
-        message = (
-            f'{OZON_BAR_LIST_K["marketplace"]} обработано {len(OZON_BAR_LIST_K["stat_list"])} заказов: \n'
-            + OZON_BAR_LIST_K["stat_list"]
-        )
-        send_message(BOT, message=message)
-    except Exception as error:
-        logging.error(error)
-        send_message(BOT_FOR_LOGS, str(error))
-
-    try:
-        time.sleep(10)
-        barcodes.Barcode().download(
-            barcode_list=YANDEX_BAR_LIST['barcode_list'],
-            marketplace=YANDEX_BAR_LIST['marketplace'],
-            prefix=YANDEX_BAR_LIST['prefix'],
-        )
-        message = (
-            f'{YANDEX_BAR_LIST["marketplace"]} обработано {len(YANDEX_BAR_LIST["stat_list"])} заказов: \n'
-            + YANDEX_BAR_LIST["stat_list"]
-        )
-        send_message(BOT, message=message)
-    except Exception as error:
-        logging.error(error)
-        send_message(BOT_FOR_LOGS, str(error))
-
-    try:
-        time.sleep(10)
-        print(OZON_BAR_LIST_2P)
-        barcodes.Barcode().download(
-            barcode_list=OZON_BAR_LIST_2P['barcode_list'],
-            marketplace=OZON_BAR_LIST_2P['marketplace'],
-            prefix=OZON_BAR_LIST_2P['prefix'],
-        )
-        message = (
-            f'{OZON_BAR_LIST_2P["marketplace"]} обработано {len(OZON_BAR_LIST_2P["stat_list"])} заказов: \n'
-            + OZON_BAR_LIST_2P["stat_list"]
-        )
-        send_message(BOT, message=message)
-    except Exception as error:
-        logging.error(error)
-        send_message(BOT_FOR_LOGS, str(error))
-
-    try:
-        time.sleep(10)
-        acts.YandexActs().download(
-            order_id=YANDEX_ACTS_DATA["order_id"]
-        )
-    except Exception as error:
-        logging.error(error)
-        send_message(BOT_FOR_LOGS, str(error))
-
-    try:
-        print(OZON_ACTS_DATA_2P)
-        acts.OzonActs().download(
-            delivery_id=OZON_ACTS_DATA_2P["delivery_id"],
-            prefix=OZON_ACTS_DATA_2P["prefix"],
-            date=str(
-                (dt.utcnow() + timedelta(hours=23)).isoformat()+'Z'
-            ),
-            order_id=OZON_ACTS_DATA_2P["order_id"]
-        )
-        send_message(
-            BOT,
-            'Акты прикреплены в '
-            f'{OZON_ACTS_DATA_2P["prefix"] + OZON_ACTS_DATA_2P["order_id"]}'
-        )
-    except Exception as error:
-        logging.error(error)
-        send_message(BOT_FOR_LOGS, str(error))
-
-    try:
-        print(OZON_ACTS_DATA_K)
-        acts.OzonActs().download(
-            delivery_id=OZON_ACTS_DATA_K["delivery_id"],
-            prefix=OZON_ACTS_DATA_K["prefix"],
-            date=str(
-                (dt.utcnow() + timedelta(hours=23)).isoformat()+'Z'
-            ),
-            order_id=OZON_ACTS_DATA_K["order_id"]
-        )
-        send_message(
-            BOT,
-            'Акты прикреплены в '
-            f'{OZON_ACTS_DATA_K["prefix"] + OZON_ACTS_DATA_K["order_id"]}'
-        )
-    except Exception as error:
-        logging.error(error)
-        send_message(BOT_FOR_LOGS, str(error))
-
-    send_message(BOT, message='Обработка завершена')
-
-    clean_pdf()
+    # try:
+    #     Ozon().market_place_request(prefix='K-')
+    #     logging.info('Заказы с OZON создались.')
+    #     clean_pdf()
+    # except Exception as error:
+    #     logging.error(error)
+    #     send_message(BOT_FOR_LOGS, str(error))
 
 
 if __name__ == '__main__':
