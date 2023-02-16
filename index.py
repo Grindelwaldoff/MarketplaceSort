@@ -562,13 +562,14 @@ def main():
     try:
         time.sleep(10)
         print(OZON_BAR_LIST_K)
+        print(len(OZON_BAR_LIST_K["stat_list"]))
         barcodes.Barcode().download(
             barcode_list=OZON_BAR_LIST_K['barcode_list'],
             marketplace=OZON_BAR_LIST_K['marketplace'],
             prefix=OZON_BAR_LIST_K['prefix'],
         )
         message = (
-            f'{OZON_BAR_LIST_K["marketplace"]} обработано {len(OZON_BAR_LIST_K["stat_list"])} заказов: \n'
+            f'{OZON_BAR_LIST_K["marketplace"]} обработано {len(OZON_BAR_LIST_K["barcode_list"])} заказов: \n'
             + OZON_BAR_LIST_K["stat_list"]
         )
         send_message(BOT, message=message)
@@ -584,7 +585,7 @@ def main():
             prefix=YANDEX_BAR_LIST['prefix'],
         )
         message = (
-            f'{YANDEX_BAR_LIST["marketplace"]} обработано {len(YANDEX_BAR_LIST["stat_list"])} заказов: \n'
+            f'{YANDEX_BAR_LIST["marketplace"]} обработано {len(YANDEX_BAR_LIST["barcode_list"])} заказов: \n'
             + YANDEX_BAR_LIST["stat_list"]
         )
         send_message(BOT, message=message)
@@ -601,7 +602,7 @@ def main():
             prefix=OZON_BAR_LIST_2P['prefix'],
         )
         message = (
-            f'{OZON_BAR_LIST_2P["marketplace"]} обработано {len(OZON_BAR_LIST_2P["stat_list"])} заказов: \n'
+            f'{OZON_BAR_LIST_2P["marketplace"]} обработано {len(OZON_BAR_LIST_2P["barcode_list"])} заказов: \n'
             + OZON_BAR_LIST_2P["stat_list"]
         )
         send_message(BOT, message=message)
